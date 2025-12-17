@@ -29,6 +29,16 @@ from santa import NAME_MAX_LENGTH
 from mwt import MWT
 from config import config
 
+import logging
+
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
+)
+
+logger = logging.getLogger(__name__)
+
+
 ACTIVE_SECRET_SANTA_KEY = "active_secret_santa"
 MUTED_KEY = "muted"
 REMOVED_KEY = "removed"
