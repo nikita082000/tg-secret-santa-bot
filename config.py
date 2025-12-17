@@ -4,7 +4,7 @@ import sys
 
 class AttrDict(dict):
     def __init__(self, *args, **kwargs):
-        super(AttrDict, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.__dict__ = self
 
 
@@ -17,6 +17,17 @@ if not BOT_TOKEN:
 
 config = AttrDict({
     "telegram": AttrDict({
-        "token": BOT_TOKEN
-    })
+        "token": BOT_TOKEN,
+        "log_chat": False,   # логувати chat_id (не обовʼязково)
+    }),
+
+    "santa": AttrDict({
+        "min_participants": 2,
+        "max_participants": 100,
+        "allow_self_gifting": False,
+    }),
+
+    "ui": AttrDict({
+        "language": "en",
+    }),
 })
