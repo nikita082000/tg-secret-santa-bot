@@ -26,6 +26,9 @@ def secret_santa(chat_id: int, bot_username: str, participants_count: int = 0):
 def joined_message(chat_id: int):
     return InlineKeyboardMarkup(
         [[
+            InlineKeyboardButton(f"{Emoji.PRESENT} wishlist", callback_data=f"private:wishlist:{chat_id}"),
+        ],
+        [
             InlineKeyboardButton(f"{Emoji.FREEZE} leave", callback_data=f"private:leave:{chat_id}"),
             InlineKeyboardButton(f"{Emoji.LIST} update your name", callback_data=f"private:updatename:{chat_id}")
         ]]

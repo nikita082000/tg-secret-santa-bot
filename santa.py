@@ -52,6 +52,12 @@ class SecretSanta:
 
     @classmethod
     def from_dict(cls, santa_dict: dict):
+        # Ensure all participants have wishlist field for backward compatibility
+        participants = santa_dict.get("participants", {})
+        for user_id, participant_data in participants.items():
+            if "wishlist" not in participant_data:
+                participant_data["wishlist"] = None
+
         return cls(
             origin_message_id=santa_dict["origin_message_id"],
             user_id=santa_dict["user_id"],
@@ -59,7 +65,7 @@ class SecretSanta:
             chat_id=santa_dict["chat_id"],
             chat_title=santa_dict["chat_title"],
             santa_message_id=santa_dict["santa_message_id"],
-            participants=santa_dict["participants"],
+            participants=participants,
             created_on=santa_dict["created_on"],
             updated_on=santa_dict["updated_on"],
             started=santa_dict["started"],
@@ -166,7 +172,8 @@ class SecretSanta:
         self._santa_dict["participants"][user.id] = {
             "name": user.first_name[:NAME_MAX_LENGTH],
             "match_message_id": match_message_id,
-            "last_join_message_id": join_message_id
+            "last_join_message_id": join_message_id,
+            "wishlist": None
         }
 
         return already_a_participant
@@ -234,6 +241,24 @@ class SecretSanta:
     def set_user_name(self, user: Union[int, User], name: str):
         user_id = self.user_id(user)
         self._santa_dict["participants"][user_id]["name"] = name
+
+    def get_user_wishlist(self, user: Union[int, User]) -> Optional[str]:
+        user_id = self.user_id(user)
+        if user_id not in self.participants:
+            return None
+        return self._santa_dict["participants"][user_id].get("wishlist", None)
+
+    def set_user_wishlist(self, user: Union[int, User], wishlist: Optional[str]):
+        user_id = self.user_id(user)
+        if user_id not in self.participants:
+            return
+        if "wishlist" not in self._santa_dict["participants"][user_id]:
+            self._santa_dict["participants"][user_id]["wishlist"] = None
+        self._santa_dict["participants"][user_id]["wishlist"] = wishlist
+
+    def has_wishlist(self, user: Union[int, User]) -> bool:
+        wishlist = self.get_user_wishlist(user)
+        return wishlist is not None and wishlist.strip() != ""
 
     def user_mention_escaped(self, user: Union[int, User]) -> str:
         user_id = self.user_id(user)

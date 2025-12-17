@@ -261,11 +261,18 @@ def get_secret_santa():
     return real_decorator
 
 
-def gen_participants_list(participants: dict, join_by: Optional[str] = None):
+def gen_participants_list(participants: dict, join_by: Optional[str] = None, santa: Optional[SecretSanta] = None):
     participants_list = []
     i = 1
     for participant_id, participant in participants.items():
-        string = f'<b>{i}</b>. {utilities.mention_escaped_by_id(participant_id, participant["name"])}'
+        wishlist_status = ""
+        if santa:
+            wishlist = participant.get("wishlist")
+            if wishlist and wishlist.strip():
+                wishlist_status = f" {Emoji.PRESENT}"
+            else:
+                wishlist_status = f" {Emoji.SNOW}"
+        string = f'<b>{i}</b>. {utilities.mention_escaped_by_id(participant_id, participant["name"])}{wishlist_status}'
         participants_list.append(string)
         i += 1
 
@@ -278,7 +285,7 @@ def gen_participants_list(participants: dict, join_by: Optional[str] = None):
 def cancel_because_cant_send_messages(context: CallbackContext, santa: SecretSanta):
     text = "<i>This Secret Santa was canceled because I can't send messages in this group</i>"
     if santa.get_participants_count():
-        participants_list = gen_participants_list(santa.participants, join_by="\n")
+        participants_list = gen_participants_list(santa.participants, join_by="\n", santa=santa)
         text = f"{text}\nParticipants:\n\n{participants_list}"
 
     return context.bot.edit_message_text(
@@ -299,7 +306,7 @@ def update_secret_santa_message(context: CallbackContext, santa: SecretSanta):
             participants_count=participants_count
         )
     elif santa.started:
-        participants_list = gen_participants_list(santa.participants)
+        participants_list = gen_participants_list(santa.participants, santa=santa)
 
         base_text = '{santa} This Secret Santa has been started and everyone ' \
                     '<a href="{bot_link}">received their match</a>!\n' \
@@ -314,7 +321,7 @@ def update_secret_santa_message(context: CallbackContext, santa: SecretSanta):
         )
         reply_markup = None
     else:
-        participants_list = gen_participants_list(santa.participants)
+        participants_list = gen_participants_list(santa.participants, santa=santa)
 
         min_participants_text = ""
         if santa.get_missing_count() > 0:
@@ -616,6 +623,11 @@ def on_match_button(update: Update, context: CallbackContext, santa: Optional[Se
 
         text = f"{Emoji.SANTA}{Emoji.PRESENT} You are {present_receiver_mention}'s <a href=\"{santa.link()}\">Secret Santa</a>!"
 
+        # Add wishlist if available
+        wishlist = santa.get_user_wishlist(present_receiver_id)
+        if wishlist and wishlist.strip():
+            text = f"{text}\n\n<b>{Emoji.PRESENT} Their wishlist:</b>\n{utilities.html_escape(wishlist)}"
+
         match_message = context.bot.send_message(santa_id, text)
         santa.set_user_match_message_id(santa_id, match_message.message_id)
 
@@ -760,7 +772,7 @@ def on_participants_command(update: Update, context: CallbackContext, santa: Opt
         update.message.reply_html(f"{Emoji.SANTA}{Emoji.TREE} Nobody has joined this Secret Santa yet!")
         return
 
-    participants_list = gen_participants_list(santa.participants, join_by="\n")
+    participants_list = gen_participants_list(santa.participants, join_by="\n", santa=santa)
 
     text = f"{Emoji.SANTA} <b>Participants list ({participants_count}):</b>\n\n{participants_list}"
 
@@ -832,6 +844,74 @@ def on_update_name_button_private(update: Update, context: CallbackContext, sant
             logger.warning("update name button in private: secret santa message was not modified after usage")
 
         return santa
+
+
+@fail_with_message(answer_to_message=True)
+@get_secret_santa()
+@private_chat_button()
+def on_wishlist_button_private(update: Update, context: CallbackContext, santa: SecretSanta):
+    logger.debug("wishlist button in private: %d (santa chat id: %d)", update.effective_user.id, santa.chat_id)
+
+    current_wishlist = santa.get_user_wishlist(update.effective_user)
+
+    if current_wishlist:
+        text = f"{Emoji.PRESENT} <b>Your current wishlist:</b>\n\n{utilities.html_escape(current_wishlist)}\n\n" \
+               f"Send me a new message to update your wishlist, or use /cancel to keep the current one."
+    else:
+        text = f"{Emoji.PRESENT} <b>Fill in your wishlist</b>\n\n" \
+               f"Send me a message with your wishes (what you would like to receive). " \
+               f"You can write anything - just describe what you'd like!\n\n" \
+               f"Use /cancel if you change your mind."
+
+    update.callback_query.answer()
+    update.callback_query.message.reply_html(text)
+
+    # Set flag in user_data to indicate we're waiting for wishlist
+    context.user_data["waiting_for_wishlist"] = santa.chat_id
+
+
+@fail_with_message()
+def on_wishlist_message(update: Update, context: CallbackContext):
+    """Handle text messages when user is filling in wishlist"""
+    if "waiting_for_wishlist" not in context.user_data:
+        # Not waiting for wishlist, ignore
+        return
+
+    santa_chat_id = context.user_data["waiting_for_wishlist"]
+    logger.debug("wishlist message from %d for chat %d", update.effective_user.id, santa_chat_id)
+
+    santa = find_santa_by_chat_id(context.dispatcher.chat_data, santa_chat_id)
+    if not santa:
+        context.user_data.pop("waiting_for_wishlist", None)
+        update.message.reply_html(f"{Emoji.SAD} This Secret Santa is no longer active")
+        return
+
+    if not santa.is_participant(update.effective_user):
+        context.user_data.pop("waiting_for_wishlist", None)
+        update.message.reply_html(f"{Emoji.FREEZE} You are not participating in this Secret Santa!")
+        return
+
+    # Save wishlist
+    wishlist_text = update.message.text
+    santa.set_user_wishlist(update.effective_user, wishlist_text)
+    context.dispatcher.chat_data[santa_chat_id][ACTIVE_SECRET_SANTA_KEY] = santa.dict()
+
+    # Clear waiting flag
+    context.user_data.pop("waiting_for_wishlist", None)
+
+    # Confirm
+    update.message.reply_html(
+        f"{Emoji.PRESENT} Your wishlist has been saved!\n\n"
+        f"<b>Your wishlist:</b>\n{utilities.html_escape(wishlist_text)}\n\n"
+        f"You can update it anytime using the wishlist button."
+    )
+
+    # Update secret santa message to show wishlist status
+    try:
+        update_secret_santa_message(context, santa)
+    except (TelegramError, BadRequest) as e:
+        if Error.MESSAGE_NOT_MODIFIED not in str(e).lower():
+            logger.warning("error updating secret santa message after wishlist update: %s", str(e))
 
 
 @fail_with_message(answer_to_message=True)
@@ -933,8 +1013,14 @@ def on_new_group_chat(update: Update, context: CallbackContext):
 
 
 @fail_with_message()
-def on_help(update: Update, _):
+def on_help(update: Update, context: CallbackContext):
     logger.info("/start or /help from: %s (text: %s)", update.effective_user.id, update.message.text)
+
+    # Check if user is in wishlist input mode
+    if "waiting_for_wishlist" in context.user_data:
+        context.user_data.pop("waiting_for_wishlist", None)
+        update.message.reply_html(f"{Emoji.CROSS} Wishlist input cancelled.")
+        return
 
     source_code = "https://github.com/zeroone2numeral2/tg-secret-santa-bot"
     text = f"Hello {utilities.html_escape(update.effective_user.first_name)}!" \
@@ -943,6 +1029,16 @@ def on_help(update: Update, _):
            f"\n\nSource code <a href=\"{source_code}\">here</a>"
 
     update.message.reply_html(text)
+
+
+@fail_with_message()
+def on_cancel_private(update: Update, context: CallbackContext):
+    """Handle /cancel command in private chat (mainly for canceling wishlist input)"""
+    if "waiting_for_wishlist" in context.user_data:
+        context.user_data.pop("waiting_for_wishlist", None)
+        update.message.reply_html(f"{Emoji.CROSS} Wishlist input cancelled.")
+    else:
+        update.message.reply_html(f"{Emoji.CROSS} Nothing to cancel.")
 
 
 @fail_with_message()
@@ -1057,7 +1153,7 @@ def secret_santa_expired(context: CallbackContext, santa: SecretSanta):
     if not santa.started:
         text = f"<i>This Secret Santa expired ({config.santa.timeout} days has passed from its creation)</i>"
     else:
-        participants_list = gen_participants_list(santa.participants)
+        participants_list = gen_participants_list(santa.participants, santa=santa)
         text = '{hourglass} This Secret Santa has been closed. Participants list:\n\n{participants}'.format(
             hourglass=Emoji.HOURGLASS,
             participants="\n".join(participants_list)
@@ -1167,6 +1263,8 @@ def main():
 
     dispatcher.add_handler(MessageHandler(Filters.chat_type.private & Filters.regex(r"^/start (-?\d+)"), on_join_deeplink))
     dispatcher.add_handler(CommandHandler(["start", "help"], on_help, filters=Filters.chat_type.private))
+    dispatcher.add_handler(CommandHandler(["cancel"], on_cancel_private, filters=Filters.chat_type.private))
+    dispatcher.add_handler(MessageHandler(Filters.chat_type.private & Filters.text & ~Filters.command, on_wishlist_message))
 
     dispatcher.add_handler(CommandHandler(["new", "newsanta", "santa"], on_new_secret_santa_command, filters=Filters.chat_type.groups))
     dispatcher.add_handler(CommandHandler(["cancel"], on_cancel_command, filters=Filters.chat_type.groups))
@@ -1180,6 +1278,7 @@ def main():
     dispatcher.add_handler(CallbackQueryHandler(on_cancel_button, pattern=r'^cancel$'))
     dispatcher.add_handler(CallbackQueryHandler(on_revoke_button, pattern=r'^revoke$'))
 
+    dispatcher.add_handler(CallbackQueryHandler(on_wishlist_button_private, pattern=r'^private:wishlist:(-\d+)$'))
     dispatcher.add_handler(CallbackQueryHandler(on_leave_button_private, pattern=r'^private:leave:(-\d+)$'))
     dispatcher.add_handler(CallbackQueryHandler(on_update_name_button_private, pattern=r'^private:updatename:(-\d+)$'))
 
