@@ -77,6 +77,7 @@ class Commands:
     GROUP_ADMINISTRATORS = [
         BotCommand("newsanta", "create a new Secret Santa in this chat"),
         BotCommand("cancel", "cancel any ongoing Secret Santa"),
+        BotCommand("participants", "view list of participants"),
         BotCommand("hidecommands", "hide these commands"),
     ]
 
@@ -744,6 +745,37 @@ def on_cancel_command(update: Update, context: CallbackContext, santa: Optional[
     )
 
 
+@fail_with_message()
+@bot_restricted_check()
+@get_secret_santa()
+def on_participants_command(update: Update, context: CallbackContext, santa: Optional[SecretSanta] = None):
+    logger.debug("/participants command: %d -> %d", update.effective_user.id, update.effective_chat.id)
+
+    if not santa:
+        update.message.reply_html("<i>There is no active Secret Santa in this chat</i>")
+        return
+
+    participants_count = santa.get_participants_count()
+    if not participants_count:
+        update.message.reply_html(f"{Emoji.SANTA}{Emoji.TREE} Nobody has joined this Secret Santa yet!")
+        return
+
+    participants_list = gen_participants_list(santa.participants, join_by="\n")
+
+    text = f"{Emoji.SANTA} <b>Participants list ({participants_count}):</b>\n\n{participants_list}"
+
+    if santa.started:
+        text = f"{text}\n\n<i>This Secret Santa has already been started</i>"
+    else:
+        missing_count = santa.get_missing_count()
+        if missing_count > 0:
+            text = f"{text}\n\n<i>Need {missing_count} more participant(s) to start</i>"
+        else:
+            text = f"{text}\n\n<i>Ready to start!</i>"
+
+    update.message.reply_html(text)
+
+
 def private_chat_button():
     # MUST be placed after @get_secret_santa()
     def real_decorator(func):
@@ -1138,6 +1170,7 @@ def main():
 
     dispatcher.add_handler(CommandHandler(["new", "newsanta", "santa"], on_new_secret_santa_command, filters=Filters.chat_type.groups))
     dispatcher.add_handler(CommandHandler(["cancel"], on_cancel_command, filters=Filters.chat_type.groups))
+    dispatcher.add_handler(CommandHandler(["participants", "list"], on_participants_command, filters=Filters.chat_type.groups))
     dispatcher.add_handler(CommandHandler(["hidecommands"], on_hide_commands_command, filters=Filters.chat_type.groups))
     dispatcher.add_handler(CommandHandler(["showcommands"], on_show_commands_command, filters=Filters.chat_type.groups))
 
