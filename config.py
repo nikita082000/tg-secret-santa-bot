@@ -1,4 +1,5 @@
-import toml
+import os
+import sys
 
 
 class AttrDict(dict):
@@ -7,7 +8,15 @@ class AttrDict(dict):
         self.__dict__ = self
 
 
-try:
-    config = toml.load('config.toml', AttrDict)
-except FileNotFoundError:
-    print("Please rename 'config.example.toml' to 'config.toml' and change the relevant values")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    print("BOT_TOKEN is not set in environment variables")
+    sys.exit(1)
+
+
+config = AttrDict({
+    "bot": AttrDict({
+        "token": BOT_TOKEN
+    })
+})
