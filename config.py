@@ -16,7 +16,7 @@ if not BOT_TOKEN:
 
 
 config = AttrDict({
-    "bot": AttrDict({
+    "telegram": AttrDict({
         "token": BOT_TOKEN
     })
 })
